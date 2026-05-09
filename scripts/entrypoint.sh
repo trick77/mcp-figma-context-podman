@@ -1,11 +1,11 @@
 #!/bin/sh
 # Container entrypoint. Builds an extra-CA bundle from any PEM/CRT files
-# mounted at /etc/ssl/extra-ca and points Node at it via NODE_EXTRA_CA_CERTS,
+# mounted at /etc/ssl/ca-anchors and points Node at it via NODE_EXTRA_CA_CERTS,
 # then exec's figma-developer-mcp.
 #
 # Why: lets a single published image work both on default-trust hosts AND
 # behind TLS-intercepting corporate proxies. Drop the corp anchor dir at
-# /etc/ssl/extra-ca:ro in the container (see compose.yaml) and Node will
+# /etc/ssl/ca-anchors:ro in the container (see compose.yaml) and Node will
 # trust the mounted certs without a rebuild.
 #
 # Node's NODE_EXTRA_CA_CERTS takes a single PEM file (one or many concatenated
@@ -13,8 +13,8 @@
 # concatenated bundle write succeeds with a read-only rootfs.
 set -eu
 
-CERT_DIR=/etc/ssl/extra-ca
-BUNDLE=/tmp/extra-ca.bundle
+CERT_DIR=/etc/ssl/ca-anchors
+BUNDLE=/tmp/ca-anchors.bundle
 
 if [ -d "$CERT_DIR" ]; then
     # Match common anchor file extensions; ignore other content. RHEL ships
@@ -25,7 +25,7 @@ if [ -d "$CERT_DIR" ]; then
         # shellcheck disable=SC2086
         cat $files > "$BUNDLE"
         export NODE_EXTRA_CA_CERTS="$BUNDLE"
-        echo "entrypoint: loaded $(echo "$files" | wc -l | tr -d ' ') extra CA file(s) into $BUNDLE" >&2
+        echo "entrypoint: loaded $(echo "$files" | wc -l | tr -d ' ') CA anchor file(s) into $BUNDLE" >&2
     fi
 fi
 

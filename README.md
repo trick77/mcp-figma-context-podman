@@ -64,7 +64,7 @@ opencode-presets reset mcp.figma-context-mcp
 ## How it works
 
 1. `podman-compose up -d` boots `ghcr.io/trick77/figma-context-mcp:latest` and publishes `127.0.0.1:23149:3333`.
-2. Entrypoint reads `/etc/ssl/extra-ca/*` (read-only mount of the host anchor dir), concatenates them to `/tmp/extra-ca.bundle`, sets `NODE_EXTRA_CA_CERTS`, and exec's the Express server on `:3333`.
+2. Entrypoint reads `/etc/ssl/ca-anchors/*` (read-only mount of the host anchor dir), concatenates them to `/tmp/ca-anchors.bundle`, sets `NODE_EXTRA_CA_CERTS`, and exec's the Express server on `:3333`.
 3. The MCP client opens a streamable-http connection to `http://127.0.0.1:23149/mcp` and sends `initialize` → `tools/list`.
 4. Tool calls hit `api.figma.com` with `FIGMA_API_KEY` from `.env`. `download_figma_images` writes files into the named volume `figma-images` mounted at `/home/node/images`.
 
@@ -148,14 +148,14 @@ podman exec figma-context-mcp node -e \
   "require('https').get('https://api.figma.com/v1/me', { headers: { 'X-Figma-Token': process.env.FIGMA_API_KEY }}, r => console.log('HTTP', r.statusCode)).on('error', e => { console.error(e.message); process.exit(1); })"
 # expect: HTTP 200 (auth succeeded). 401/403 means PAT is bad. cert error = corp CA mount missing or wrong path.
 
-# 4. Confirm extra-CA bundle was loaded (look for the entrypoint message in logs).
-podman logs figma-context-mcp 2>&1 | grep -i 'extra CA'
+# 4. Confirm the CA anchor bundle was loaded (look for the entrypoint message in logs).
+podman logs figma-context-mcp 2>&1 | grep -i 'CA anchor'
 ```
 
 ## Hardening
 
 - `read_only` rootfs; tmpfs mount at `/tmp` discarded on exit.
-- Two writable mounts: named volume `figma-images` for the `download_figma_images` tool; `/etc/ssl/extra-ca` mounted **read-only** for corp CAs.
+- Two writable mounts: named volume `figma-images` for the `download_figma_images` tool; `/etc/ssl/ca-anchors` mounted **read-only** for corp CAs.
 - `cap_drop: ALL`, `no-new-privileges`, runs as non-root `node`.
 - No host bind mounts other than the read-only CA anchor mount.
 - `pids_limit=64`.

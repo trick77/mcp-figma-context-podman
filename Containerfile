@@ -2,7 +2,7 @@ FROM node:22-slim
 
 # Install only what's needed at runtime. ca-certificates ships the system
 # trust store; the entrypoint script unions our system bundle with any
-# corporate CAs mounted at /etc/ssl/extra-ca via NODE_EXTRA_CA_CERTS.
+# corporate CAs mounted at /etc/ssl/ca-anchors via NODE_EXTRA_CA_CERTS.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
@@ -51,7 +51,7 @@ EXPOSE 3333
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD node -e "require('net').createConnection(3333,'127.0.0.1').on('connect',function(){this.end();process.exit(0)}).on('error',()=>process.exit(1))" || exit 1
 
-# Entrypoint script unions any mounted /etc/ssl/extra-ca/* into a bundle and
+# Entrypoint script unions any mounted /etc/ssl/ca-anchors/* into a bundle and
 # sets NODE_EXTRA_CA_CERTS before exec'ing figma-developer-mcp. Upstream
 # speaks HTTP natively (Express) — no mcp-proxy needed. The host publish at
 # 127.0.0.1:23149:3333 keeps it loopback-only.

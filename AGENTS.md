@@ -10,7 +10,7 @@ Rules for agents working in this repo. Architecture and file layout are visible 
 - **Don't promote the HEALTHCHECK to a JSON-RPC `initialize` call.** Upstream creates a session per `initialize`; healthchecks would spawn sessions on a 30s interval. Keep it a TCP probe.
 - **Don't add `mem_limit`/`cpus` (compose) or `MemoryMax`/`CPUQuota` (Quadlet).** Rootless cgroup v2 hosts often lack `cpu`/`memory` controller delegation; the container fails to start. `pids_limit` is the only ceiling that's safe rootless.
 - **Don't remove `FRAMELINK_TELEMETRY=false` or `DO_NOT_TRACK=1`.** Upstream PostHog telemetry is on by default; both env vars are belt-and-suspenders. Runtime egress should be `api.figma.com` only.
-- **Don't bake corporate CAs into the image at build time.** CAs are mounted at runtime (`/etc/ssl/extra-ca`, read by `scripts/entrypoint.sh`). The published GHCR image must stay universal — same image for default-trust and TLS-intercepting hosts.
+- **Don't bake corporate CAs into the image at build time.** CAs are mounted at runtime (`/etc/ssl/ca-anchors`, read by `scripts/entrypoint.sh`). The published GHCR image must stay universal — same image for default-trust and TLS-intercepting hosts.
 - **Don't add additional host bind mounts.** The read-only CA anchor mount is the only allowed exception. No other host paths into the container.
 - **Don't put the PAT in the OpenCode config.** It lives in `.env` (chmod 600). One rotation point.
 - **Don't add `podman auto-update` labels.** Pulls are operator-controlled by design.
