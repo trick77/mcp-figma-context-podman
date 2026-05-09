@@ -13,10 +13,13 @@ services:
       - figma-images:/home/node/images
       # Corporate CA anchors. The entrypoint unions every .crt/.pem in
       # /etc/ssl/ca-anchors into a single bundle and points Node at it via
-      # NODE_EXTRA_CA_CERTS. Read-only mount; ',Z' relabels for SELinux on
-      # RHEL/Fedora. Comment out (or change the host path) if you don't
-      # need a TLS-intercepting corporate proxy.
-      - /etc/pki/ca-trust/source/anchors:/etc/ssl/ca-anchors:ro,Z
+      # NODE_EXTRA_CA_CERTS. Read-only mount. Comment out (or change the
+      # host path) if you don't need a TLS-intercepting corporate proxy.
+      #
+      # No SELinux ',Z' here — that would relabel the system anchor dir
+      # away from cert_t and break update-ca-trust. On SELinux-enforcing
+      # RHEL, see README "SELinux on enforcing RHEL" for the workaround.
+      - /etc/pki/ca-trust/source/anchors:/etc/ssl/ca-anchors:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:
