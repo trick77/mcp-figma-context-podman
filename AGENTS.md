@@ -19,7 +19,8 @@ Rules for agents working in this repo. Architecture and file layout are visible 
 ## Do
 
 - **Default branch is `master`, never `main`.**
-- **`.env.example`'s `VERSION=` is the single source of truth for the upstream npm version.** `.github/workflows/build.yaml` reads it; `.github/workflows/upstream-watch.yaml` bumps it. Don't introduce a second pin.
-- **Use bare semver for `VERSION=`** (no leading `v`) — it's an npm version, not a git tag.
+- **`.upstream-version` is the single source of truth for the upstream npm version.** `.github/workflows/build.yaml` reads it; `.github/workflows/upstream-watch.yaml` bumps it. Don't introduce a second pin (the `ARG VERSION=latest` in `Containerfile` is just a fallback for ad-hoc local builds — CI always passes the pin).
+- **Use bare semver in `.upstream-version`** (no leading `v`) — it's an npm version, not a git tag.
+- **`.env.example` is runtime-only.** The CI build pin does not belong there. Do not put any build-time vars in it.
 - **amd64-only.** Don't add `linux/arm64` to `platforms:` without a real arm64 consumer; qemu cross-build is 5–10× slower than native.
 - **Use `Containerfile`/`compose.yaml`/`podman`/`podman-compose`.** Not `Dockerfile`, not `docker-compose.yml`, not `docker`.

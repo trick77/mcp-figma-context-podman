@@ -1,10 +1,10 @@
 name: Upstream-Watch
 
 # Polls the npm registry for new figma-developer-mcp releases and opens an
-# auto-bump PR against the VERSION= pin in .env.example. The pin is the
-# single source of truth that scripts/build.sh reads when building locally.
+# auto-bump PR against .upstream-version. That file is the single source of
+# truth that build.yaml reads when building the image.
 #
-# Dependabot has no ecosystem for "arbitrary npm version in a dotenv file",
+# Dependabot has no ecosystem for "arbitrary npm version in a plain file",
 # which is why this workflow exists. Cron is daily; trigger manually via
 # "Run workflow" any time.
 
@@ -39,9 +39,10 @@ jobs:
       - name: Resolve current pin
         id: current
         run: |
-          # VERSION=0.11.0 in .env.example — bare semver (no leading 'v')
-          # because npm versions don't take a leading v.
-          cur=$(awk -F= '/^VERSION=/ {print $2; exit}' .env.example)
+          # .upstream-version is a single-line file holding the pinned npm
+          # version. Bare semver (no leading 'v') because npm versions don't
+          # take a leading v.
+          cur=$(tr -d '[:space:]' < .upstream-version)
           echo "version=${cur}" >> "$GITHUB_OUTPUT"
           echo "Current pin: ${cur}"
 
@@ -84,11 +85,11 @@ jobs:
           echo "needs_pr=true" >> "$GITHUB_OUTPUT"
           echo "Will bump $cur -> $new"
 
-      - name: Bump VERSION in .env.example
+      - name: Bump .upstream-version
         if: steps.decide.outputs.needs_pr == 'true'
         run: |
-          sed -i "s|^VERSION=.*|VERSION=${{ steps.latest.outputs.version }}|" .env.example
-          grep '^VERSION=' .env.example
+          printf '%s\n' "${{ steps.latest.outputs.version }}" > .upstream-version
+          cat .upstream-version
 
       - name: Open / update PR
         if: steps.decide.outputs.needs_pr == 'true'
@@ -102,15 +103,12 @@ jobs:
           title: "Upstream bump: ${{ steps.current.outputs.version }} -> ${{ steps.latest.outputs.version }}"
           labels: dependencies, upstream
           body: |
-            Automated bump of `VERSION=` in `.env.example`.
+            Automated bump of `.upstream-version`.
 
             - Old: `${{ steps.current.outputs.version }}`
             - New: `${{ steps.latest.outputs.version }}`
             - npm: https://www.npmjs.com/package/figma-developer-mcp/v/${{ steps.latest.outputs.version }}
             - Upstream releases: https://github.com/GLips/Figma-Context-MCP/releases
 
-            After merge, rebuild the image:
-            ```sh
-            ./scripts/update.sh ${{ steps.latest.outputs.version }}
-            podman-compose up -d --force-recreate
-            ```
+            On merge, `build.yaml` rebuilds and republishes
+            `ghcr.io/${{ github.repository_owner }}/figma-context-mcp` at the new version.
