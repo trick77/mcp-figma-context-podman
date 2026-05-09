@@ -47,12 +47,13 @@ podman-compose down
 Use the `mcp-http-noauth` preset from [`trick77/opencode-presets`](https://github.com/trick77/opencode-presets):
 
 ```sh
-npm install -g opencode-presets
-opencode-presets install mcp-http-noauth
+npm install -g opencode-presets@latest && opencode-presets install mcp-http-noauth
 # When prompted:
 #   id  -> figma-context-mcp
 #   URL -> http://127.0.0.1:23149/mcp
 ```
+
+`@latest` forces npm to upgrade an existing global install (npm has no `--upgrade` flag; pinning to `@latest` is the canonical equivalent).
 
 The preset patches `~/.config/opencode/opencode.json` with a `type: "remote"` entry. Restart OpenCode; the server appears as `figma-context-mcp`.
 
