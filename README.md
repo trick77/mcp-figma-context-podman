@@ -117,7 +117,7 @@ To pin a specific upstream version, change the tag in `compose.yaml` (e.g. `:0.1
 
 ## Telemetry
 
-Upstream ships PostHog telemetry on by default. The image disables it via `FRAMELINK_TELEMETRY=false` and `DO_NOT_TRACK=1` (also repeated in `.env.example`). Runtime egress should be `api.figma.com` only.
+Upstream ships PostHog telemetry on by default. The image disables it via `FRAMELINK_TELEMETRY=false` and `DO_NOT_TRACK=1` baked into the Containerfile's `ENV` — operators don't need to set anything. Runtime egress should be `api.figma.com` only.
 
 ## Network posture
 
