@@ -1,0 +1,21 @@
+services:
+  figma-context-mcp:
+    image: ghcr.io/trick77/figma-context-mcp:latest
+    container_name: figma-context-mcp
+    restart: "no"
+    env_file: .env
+    ports:
+      - "127.0.0.1:23149:3333"
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - figma-images:/home/node/images
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+
+volumes:
+  figma-images:

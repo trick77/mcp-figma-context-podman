@@ -1,0 +1,116 @@
+name: Upstream-Watch
+
+# Polls the npm registry for new figma-developer-mcp releases and opens an
+# auto-bump PR against the VERSION= pin in .env.example. The pin is the
+# single source of truth that scripts/build.sh reads when building locally.
+#
+# Dependabot has no ecosystem for "arbitrary npm version in a dotenv file",
+# which is why this workflow exists. Cron is daily; trigger manually via
+# "Run workflow" any time.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # daily at 06:17 UTC (~07:17–08:17 Europe/Zurich)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify UPSTREAM_PR_TOKEN is set
+        # Surface a loud warning (not a failure) when the PAT secret is
+        # missing. Without it the auto-PR opens but downstream CI won't run
+        # against it (a known limitation of GITHUB_TOKEN-authored PRs).
+        env:
+          UPSTREAM_PR_TOKEN: ${{ secrets.UPSTREAM_PR_TOKEN }}
+        run: |
+          if [ -z "${UPSTREAM_PR_TOKEN}" ]; then
+            echo "::warning::UPSTREAM_PR_TOKEN secret is not set. The bump PR will be opened with GITHUB_TOKEN, which by design does NOT trigger downstream workflows. To fix, create a fine-grained PAT (Contents r/w, Pull requests r/w on this repo) and add it as a repository secret named UPSTREAM_PR_TOKEN."
+          else
+            echo "UPSTREAM_PR_TOKEN is set; bump PRs will trigger downstream workflows normally."
+          fi
+
+      - name: Resolve current pin
+        id: current
+        run: |
+          # VERSION=0.11.0 in .env.example — bare semver (no leading 'v')
+          # because npm versions don't take a leading v.
+          cur=$(awk -F= '/^VERSION=/ {print $2; exit}' .env.example)
+          echo "version=${cur}" >> "$GITHUB_OUTPUT"
+          echo "Current pin: ${cur}"
+
+      - name: Resolve latest figma-developer-mcp version on npm
+        id: latest
+        run: |
+          # npm registry returns dist-tags as authoritative "latest" — that's
+          # what `npm install figma-developer-mcp@latest` resolves to, which
+          # matches the Containerfile's behavior when VERSION=latest. Strip
+          # any leading 'v' defensively even though npm doesn't ship them.
+          latest=$(curl -fsSL https://registry.npmjs.org/figma-developer-mcp/latest \
+                   | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])" \
+                   | sed 's/^v//')
+          if [ -z "$latest" ]; then
+            echo "::error::Could not resolve latest figma-developer-mcp version from npm" >&2
+            exit 1
+          fi
+          echo "version=${latest}" >> "$GITHUB_OUTPUT"
+          echo "Latest npm version: ${latest}"
+
+      - name: Decide whether to PR
+        id: decide
+        run: |
+          cur="${{ steps.current.outputs.version }}"
+          new="${{ steps.latest.outputs.version }}"
+          if [ "$cur" = "$new" ]; then
+            echo "needs_pr=false" >> "$GITHUB_OUTPUT"
+            echo "Already pinned to latest ($cur) — nothing to do."
+            exit 0
+          fi
+          # Refuse to downgrade. semver-sort cur and new; if cur is the
+          # higher one, bail out — npm's "latest" dist-tag can be moved
+          # backwards and we should never silently regress.
+          highest=$(printf '%s\n%s\n' "$cur" "$new" | sort -V | tail -1)
+          if [ "$highest" = "$cur" ]; then
+            echo "::warning::Refusing to downgrade: current=$cur newer than discovered=$new" >&2
+            echo "needs_pr=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "needs_pr=true" >> "$GITHUB_OUTPUT"
+          echo "Will bump $cur -> $new"
+
+      - name: Bump VERSION in .env.example
+        if: steps.decide.outputs.needs_pr == 'true'
+        run: |
+          sed -i "s|^VERSION=.*|VERSION=${{ steps.latest.outputs.version }}|" .env.example
+          grep '^VERSION=' .env.example
+
+      - name: Open / update PR
+        if: steps.decide.outputs.needs_pr == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.UPSTREAM_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          branch: bot/upstream-bump-${{ steps.latest.outputs.version }}
+          base: master
+          delete-branch: true
+          commit-message: "ci: bump figma-developer-mcp ${{ steps.current.outputs.version }} -> ${{ steps.latest.outputs.version }}"
+          title: "Upstream bump: ${{ steps.current.outputs.version }} -> ${{ steps.latest.outputs.version }}"
+          labels: dependencies, upstream
+          body: |
+            Automated bump of `VERSION=` in `.env.example`.
+
+            - Old: `${{ steps.current.outputs.version }}`
+            - New: `${{ steps.latest.outputs.version }}`
+            - npm: https://www.npmjs.com/package/figma-developer-mcp/v/${{ steps.latest.outputs.version }}
+            - Upstream releases: https://github.com/GLips/Figma-Context-MCP/releases
+
+            After merge, rebuild the image:
+            ```sh
+            ./scripts/update.sh ${{ steps.latest.outputs.version }}
+            podman-compose up -d --force-recreate
+            ```
