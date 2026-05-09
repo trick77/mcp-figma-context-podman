@@ -171,7 +171,8 @@ Holds the PAT. Set `chmod 600 .env` after editing — it's gitignored but still 
 .
 ├── Containerfile                 # single-stage Node 22 + npm install + entrypoint
 ├── compose.yaml                  # podman-compose service, named volume, CA mount
-├── .env.example                  # config template (.env is gitignored)
+├── .env.example                  # runtime config template (.env is gitignored)
+├── .upstream-version             # CI-only: pinned figma-developer-mcp npm version
 ├── scripts/
 │   └── entrypoint.sh             # runtime CA union + exec figma-developer-mcp
 ├── README.md

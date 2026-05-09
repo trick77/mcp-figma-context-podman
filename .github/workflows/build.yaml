@@ -18,15 +18,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # Single source of truth for the upstream npm version: .env.example.
+      # Single source of truth for the upstream npm version: .upstream-version.
       # upstream-watch.yaml bumps that file via PR; build.yaml just reads it.
-      # No second pin in this workflow to keep in sync.
-      - name: Resolve UPSTREAM_VERSION from .env.example
+      # Lives in its own file (not .env.example) so runtime config and CI
+      # build pin don't share a namespace.
+      - name: Resolve UPSTREAM_VERSION
         id: ver
         run: |
-          v=$(awk -F= '/^VERSION=/{print $2; exit}' .env.example | tr -d '[:space:]')
+          v=$(tr -d '[:space:]' < .upstream-version)
           if [ -z "$v" ]; then
-            echo "::error::No VERSION= line in .env.example" >&2
+            echo "::error::.upstream-version is empty" >&2
             exit 1
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
