@@ -2,6 +2,11 @@
 .env.bak
 *.local
 
+# Operator-supplied corporate root CAs. Drop *.crt / *.pem into ./certs/.
+# Never committed; the dir itself is kept via .gitkeep.
+certs/*
+!certs/.gitkeep
+
 # IDEs / editors
 .idea/
 *.iml
