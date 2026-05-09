@@ -40,7 +40,7 @@ jobs:
       # is essentially a registry upload of cached layers.
       #
       # No build-time CA bake-in — corporate CAs are mounted at runtime via
-      # the entrypoint script (see compose.yaml `/etc/ssl/extra-ca` mount).
+      # the entrypoint script (see compose.yaml `/etc/ssl/ca-anchors` mount).
       # The published image is therefore universal.
       - name: Build amd64 (load + cache)
         uses: docker/build-push-action@v7
@@ -211,13 +211,12 @@ jobs:
           owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           image="ghcr.io/${owner}/figma-context-mcp"
           v="${{ steps.ver.outputs.version }}"
-          # Build a SemVer-pre-release-style timestamp tag tied to the
-          # upstream version. Example: 0.11.0-20260509T1234Z.
-          # - Sortable lexicographically.
+          # Timestamp tag tied to the upstream version. Always UTC.
+          # Example: 0.11.0-20260509-1234
+          # - Sortable lexicographically (date before time).
           # - Immutable (each build gets its own minute-precision tag).
-          # - SemVer-valid: "0.11.0-20260509T1234Z" parses with the date as
-          #   the pre-release identifier.
-          ts=$(date -u +%Y%m%dT%H%MZ)
+          # - SemVer-valid: hyphens are allowed in the pre-release identifier.
+          ts=$(date -u +%Y%m%d-%H%M)
           versioned="${v}-${ts}"
 
           # Every released image gets all three:
