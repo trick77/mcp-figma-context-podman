@@ -1,0 +1,257 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # Single source of truth for the upstream npm version: .env.example.
+      # upstream-watch.yaml bumps that file via PR; build.yaml just reads it.
+      # No second pin in this workflow to keep in sync.
+      - name: Resolve UPSTREAM_VERSION from .env.example
+        id: ver
+        run: |
+          v=$(awk -F= '/^VERSION=/{print $2; exit}' .env.example | tr -d '[:space:]')
+          if [ -z "$v" ]; then
+            echo "::error::No VERSION= line in .env.example" >&2
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Upstream version: $v"
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Build amd64 once, load into the local docker daemon for the smoke
+      # test, and push the result to the GHA build cache. The publish step
+      # below reuses this exact cache (same builder, same scope) so the push
+      # is essentially a registry upload of cached layers.
+      #
+      # No build-time CA bake-in — corporate CAs are mounted at runtime via
+      # the entrypoint script (see compose.yaml `/etc/ssl/extra-ca` mount).
+      # The published image is therefore universal.
+      - name: Build amd64 (load + cache)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Containerfile
+          build-args: |
+            VERSION=${{ steps.ver.outputs.version }}
+            GIT_SHA=${{ github.sha }}
+            IMAGE_SOURCE=https://github.com/${{ github.repository }}
+          platforms: linux/amd64
+          load: true
+          tags: localhost/figma-context-mcp:local
+          cache-from: type=gha,scope=build
+          cache-to: type=gha,scope=build,mode=max
+          provenance: false
+
+      - name: Inspect image
+        run: |
+          docker images localhost/figma-context-mcp
+          docker run --rm --entrypoint sh localhost/figma-context-mcp:local -c '
+            echo "=== user ==="; id
+            echo "=== node ==="; node --version
+            echo "=== bin ==="; which figma-developer-mcp
+            echo "=== entrypoint ==="; ls -la /usr/local/bin/entrypoint.sh
+            echo "=== ca bundle cert count ==="
+            awk "/-----BEGIN CERTIFICATE-----/{c++} END{print c}" /etc/ssl/certs/ca-certificates.crt
+            echo "=== telemetry env ==="; env | grep -E "(TELEMETRY|DO_NOT_TRACK)"
+            echo "=== IMAGE_DIR ==="; echo "$IMAGE_DIR"
+          '
+
+      - name: Smoke test — start container, MCP initialize, tools/list
+        run: |
+          set -euo pipefail
+          docker rm -f figma-ci 2>/dev/null || true
+          # Use a throwaway named volume so the read-only rootfs has a writable
+          # /home/node/images mount (matching production compose.yaml shape).
+          docker volume rm figma-images-ci 2>/dev/null || true
+          docker run -d --name figma-ci \
+            --read-only \
+            --tmpfs /tmp \
+            -v figma-images-ci:/home/node/images \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges \
+            -p 127.0.0.1:23149:3333 \
+            -e FIGMA_API_KEY=figd_dummy_for_ci \
+            localhost/figma-context-mcp:local
+
+          echo ">> Waiting for HTTP server to start"
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null --max-time 1 -X POST http://127.0.0.1:23149/mcp \
+              -H 'Content-Type: application/json' \
+              -H 'Accept: application/json, text/event-stream' \
+              --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}'; then
+              echo ">> Endpoint responding after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
+          echo ">> initialize"
+          init_resp=$(curl -sNi -X POST http://127.0.0.1:23149/mcp \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            --max-time 5)
+          echo "$init_resp"
+
+          # ASSERTION 1: a JSON-RPC initialize response with a serverInfo block
+          # came back. Upstream advertises `serverInfo.name` from the
+          # @modelcontextprotocol/sdk McpServer wired in src/mcp-server.ts —
+          # if Express weren't piping requests into the SDK handler, this
+          # field would not appear.
+          if ! printf '%s' "$init_resp" | grep -q '"serverInfo"'; then
+            echo "FAIL: initialize did not return serverInfo" >&2
+            exit 1
+          fi
+          echo ">> serverInfo present"
+
+          # ASSERTION 2: a session id was issued (upstream mounts stateless
+          # streamable-http but the SDK still emits an mcp-session-id header).
+          sid=$(printf '%s\n' "$init_resp" | awk 'BEGIN{IGNORECASE=1}/^mcp-session-id:/{print $2}' | tr -d '\r')
+          if [ -n "$sid" ]; then
+            echo ">> session: $sid"
+            sid_header=(-H "mcp-session-id: $sid")
+          else
+            echo ">> no mcp-session-id header (upstream is stateless — fine)"
+            sid_header=()
+          fi
+
+          # Send notifications/initialized so the server transitions to ready.
+          curl -sN -X POST http://127.0.0.1:23149/mcp \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            "${sid_header[@]}" \
+            --data '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            --max-time 5 || true
+
+          echo ">> tools/list"
+          tools=$(curl -sN -X POST http://127.0.0.1:23149/mcp \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            "${sid_header[@]}" \
+            --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            --max-time 5)
+          # Avoid `echo "$tools" | head -c 2000` — head closes the pipe early,
+          # echo gets EPIPE, and bash -e aborts the script.
+          printf '%.2000s\n' "$tools"
+
+          # ASSERTION 3: get_figma_data appears in tools/list. This is the
+          # core tool every figma-developer-mcp release ships; if it's
+          # missing, the upstream package is broken or our Containerfile
+          # didn't actually install it. We don't tools/call it — every
+          # figma-developer-mcp tool needs a real PAT to reach api.figma.com.
+          if ! printf '%s' "$tools" | grep -q '"name":"get_figma_data"'; then
+            echo "FAIL: tools/list did not include get_figma_data" >&2
+            exit 1
+          fi
+          echo ">> tools/list includes get_figma_data — upstream wired up"
+
+          # ASSERTION 4: download_figma_images is also registered (it's the
+          # tool that needs the named volume). If upstream silently dropped
+          # it, the volume mount in compose.yaml/README would be dead weight.
+          if ! printf '%s' "$tools" | grep -q '"name":"download_figma_images"'; then
+            echo "FAIL: tools/list did not include download_figma_images" >&2
+            exit 1
+          fi
+          echo ">> tools/list includes download_figma_images"
+
+          echo ">> OK — MCP round-trip verified end-to-end"
+
+      - name: Container logs (always)
+        if: always()
+        run: docker logs figma-ci 2>&1 | tail -100 || true
+
+      - name: Stop container and cleanup
+        if: always()
+        run: |
+          docker rm -f figma-ci 2>/dev/null || true
+          docker volume rm figma-images-ci 2>/dev/null || true
+
+      # ---- Publish only on push to master, after smoke test passed. ----
+      #
+      # Same builder + same cache scope as the build above, so every layer
+      # is a cache hit — the publish step is essentially just a registry
+      # push.
+      #
+      # amd64-only by design: arm64 builds under QEMU emulation are 5–10×
+      # slower than native and we have no native arm64 runner here.
+      #
+      # IMPORTANT: this image is built in CI, which has no corporate root
+      # CAs. It is suitable for non-corporate users and as a known-good
+      # baseline. Enterprises behind a TLS-intercepting proxy MUST still run
+      # ./scripts/build.sh on a host with corp anchors populated.
+
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        id: tags
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/${owner}/figma-context-mcp"
+          v="${{ steps.ver.outputs.version }}"
+          # Build a SemVer-pre-release-style timestamp tag tied to the
+          # upstream version. Example: 0.11.0-20260509T1234Z.
+          # - Sortable lexicographically.
+          # - Immutable (each build gets its own minute-precision tag).
+          # - SemVer-valid: "0.11.0-20260509T1234Z" parses with the date as
+          #   the pre-release identifier.
+          ts=$(date -u +%Y%m%dT%H%MZ)
+          versioned="${v}-${ts}"
+
+          # Every released image gets all three:
+          #  :<upstream>-<utc-timestamp>   immutable per-build artifact
+          #  :<upstream>                   moves to latest build of THIS upstream version
+          #  :latest                       moves to latest published build, period
+          tags="${image}:${versioned},${image}:${v},${image}:latest"
+
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "Will push:"
+          printf '  %s\n' ${tags//,/ }
+
+      - name: Build amd64 and push (reused from cache)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Containerfile
+          build-args: |
+            VERSION=${{ steps.ver.outputs.version }}
+            GIT_SHA=${{ github.sha }}
+            IMAGE_SOURCE=https://github.com/${{ github.repository }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=build
+          cache-to: type=gha,scope=build,mode=max
+          provenance: false
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run shellcheck on scripts/
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck scripts/*.sh
