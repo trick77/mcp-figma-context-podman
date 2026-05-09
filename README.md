@@ -44,11 +44,10 @@ podman-compose down
 
 ## Wiring it into OpenCode
 
-Use the `mcp-remote-add-noauth` preset from [`trick77/opencode-presets`](https://github.com/trick77/opencode-presets):
+Use the `mcp-http-noauth` preset from [`trick77/opencode-presets`](https://github.com/trick77/opencode-presets):
 
 ```sh
-npm install -g opencode-presets
-opencode-presets install mcp-remote-add-noauth
+npm install -g opencode-presets && opencode-presets install mcp-http-noauth
 # When prompted:
 #   id  -> figma-context-mcp
 #   URL -> http://127.0.0.1:23149/mcp
