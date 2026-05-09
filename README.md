@@ -27,29 +27,9 @@ $EDITOR .env                       # set FIGMA_API_KEY
 podman-compose up -d               # pulls + starts
 ```
 
-The default `compose.yaml` mounts `/etc/pki/ca-trust/source/anchors` (the RHEL/Fedora system anchor dir) read-only into the container. The entrypoint unions every `.crt`/`.pem` it finds there into a Node-readable bundle and points `NODE_EXTRA_CA_CERTS` at it. **No rebuild needed** — drop a new corp cert into the host anchor dir and `podman-compose restart`.
+**Behind a TLS-intercepting corporate proxy?** Drop your corp root CA(s) (`.crt` / `.pem`) into the `./certs/` directory next to `compose.yaml`, then `podman-compose restart`. The entrypoint unions everything in `./certs/` into a Node-readable bundle, sets `NODE_EXTRA_CA_CERTS`, and logs `entrypoint: loaded N CA anchor file(s)` on startup. Files in `./certs/` are gitignored. Empty dir is a no-op (the default for non-corp users).
 
-If your distro keeps anchors elsewhere (Debian/Ubuntu use `/usr/local/share/ca-certificates/`), edit the `volumes:` line in `compose.yaml`. If you don't have a TLS-intercepting proxy, comment the line out.
-
-### SELinux on enforcing RHEL
-
-The CA anchor mount has no `,Z` flag — using one would relabel `/etc/pki/ca-trust/source/anchors` away from `cert_t` and break `update-ca-trust`. The trade-off: with SELinux **enforcing**, the container can't read the mount and silently loads zero certs. Symptom: TLS to `api.figma.com` fails with cert errors despite the volume being mounted.
-
-Pick one fix on the host:
-
-```sh
-# Preferred: flip the SELinux boolean (persists across reboots).
-sudo setsebool -P container_use_cert_t 1
-
-# Fallback: per-container label opt-out. Add to compose.yaml under security_opt:
-#   - label=disable
-```
-
-Verify after restart:
-
-```sh
-podman logs figma-context-mcp 2>&1 | grep 'CA anchor'   # should report N file(s) loaded
-```
+> Operators using `compose.yaml` outside a clone need to create a `./certs/` dir next to it (with whatever cert files you want loaded, or empty).
 
 The container is **standalone — start and stop it manually**. There's no auto-start; if you want it on after a reboot, run `podman-compose up -d` again.
 
@@ -84,7 +64,7 @@ opencode-presets reset mcp.figma-context-mcp
 ## How it works
 
 1. `podman-compose up -d` boots `ghcr.io/trick77/figma-context-mcp:latest` and publishes `127.0.0.1:23149:3333`.
-2. Entrypoint reads `/etc/ssl/ca-anchors/*` (read-only mount of the host anchor dir), concatenates them to `/tmp/ca-anchors.bundle`, sets `NODE_EXTRA_CA_CERTS`, and exec's the Express server on `:3333`.
+2. Entrypoint reads `/etc/ssl/ca-anchors/*` (read-only mount of `./certs/`), concatenates them to `/tmp/ca-anchors.bundle`, sets `NODE_EXTRA_CA_CERTS`, and exec's the Express server on `:3333`.
 3. The MCP client opens a streamable-http connection to `http://127.0.0.1:23149/mcp` and sends `initialize` → `tools/list`.
 4. Tool calls hit `api.figma.com` with `FIGMA_API_KEY` from `.env`. `download_figma_images` writes files into the named volume `figma-images` mounted at `/home/node/images`.
 
@@ -166,7 +146,7 @@ curl -sN -X POST http://127.0.0.1:23149/mcp \
 # 3. api.figma.com TLS validates with the mounted bundle.
 podman exec figma-context-mcp node -e \
   "require('https').get('https://api.figma.com/v1/me', { headers: { 'X-Figma-Token': process.env.FIGMA_API_KEY }}, r => console.log('HTTP', r.statusCode)).on('error', e => { console.error(e.message); process.exit(1); })"
-# expect: HTTP 200 (auth succeeded). 401/403 means PAT is bad. cert error = corp CA mount missing or wrong path.
+# expect: HTTP 200 (auth succeeded). 401/403 means PAT is bad. cert error = drop your corp CA into ./certs/ and restart.
 
 # 4. Confirm the CA anchor bundle was loaded (look for the entrypoint message in logs).
 podman logs figma-context-mcp 2>&1 | grep -i 'CA anchor'
@@ -175,9 +155,9 @@ podman logs figma-context-mcp 2>&1 | grep -i 'CA anchor'
 ## Hardening
 
 - `read_only` rootfs; tmpfs mount at `/tmp` discarded on exit.
-- Two writable mounts: named volume `figma-images` for the `download_figma_images` tool; `/etc/ssl/ca-anchors` mounted **read-only** for corp CAs.
+- One writable mount: named volume `figma-images` for the `download_figma_images` tool.
+- One read-only host bind mount: `./certs/` → `/etc/ssl/ca-anchors` (project-local, not a system dir).
 - `cap_drop: ALL`, `no-new-privileges`, runs as non-root `node`.
-- No host bind mounts other than the read-only CA anchor mount.
 - `pids_limit=64`.
 - Loopback-only port publish.
 
@@ -193,6 +173,7 @@ Holds the PAT. Set `chmod 600 .env` after editing — it's gitignored but still 
 ├── compose.yaml                  # podman-compose service, named volume, CA mount
 ├── .env.example                  # runtime config template (.env is gitignored)
 ├── .upstream-version             # CI-only: pinned figma-developer-mcp npm version
+├── certs/                        # operator-supplied corp root CAs (.crt/.pem); gitignored
 ├── scripts/
 │   └── entrypoint.sh             # runtime CA union + exec figma-developer-mcp
 ├── README.md

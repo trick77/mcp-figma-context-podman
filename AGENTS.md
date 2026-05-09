@@ -11,7 +11,7 @@ Rules for agents working in this repo. Architecture and file layout are visible 
 - **Don't add `mem_limit`/`cpus` (compose) or `MemoryMax`/`CPUQuota` (Quadlet).** Rootless cgroup v2 hosts often lack `cpu`/`memory` controller delegation; the container fails to start. `pids_limit` is the only ceiling that's safe rootless.
 - **Don't remove `FRAMELINK_TELEMETRY=false` or `DO_NOT_TRACK=1` from the Containerfile's `ENV`.** Upstream PostHog telemetry is on by default; both env vars are belt-and-suspenders. They live in the image, not `.env.example`, so operators don't have to know they exist. Runtime egress should be `api.figma.com` only.
 - **Don't bake corporate CAs into the image at build time.** CAs are mounted at runtime (`/etc/ssl/ca-anchors`, read by `scripts/entrypoint.sh`). The published GHCR image must stay universal — same image for default-trust and TLS-intercepting hosts.
-- **Don't add additional host bind mounts.** The read-only CA anchor mount is the only allowed exception. No other host paths into the container.
+- **Don't add additional host bind mounts.** The read-only `./certs/` → `/etc/ssl/ca-anchors` mount is the only allowed exception. Don't bind-mount any *system* dir (e.g. `/etc/pki/...`, `/usr/local/share/ca-certificates/`) — that mauls the host's SELinux labels and breaks `update-ca-trust`. Project-local only.
 - **Don't put the PAT in the OpenCode config.** It lives in `.env` (chmod 600). One rotation point.
 - **Don't add `podman auto-update` labels.** Pulls are operator-controlled by design.
 - **Don't add `package.json` or Node source here.** Server code comes from the npm package; this repo is a wrapper only.
