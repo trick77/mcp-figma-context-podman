@@ -31,6 +31,26 @@ The default `compose.yaml` mounts `/etc/pki/ca-trust/source/anchors` (the RHEL/F
 
 If your distro keeps anchors elsewhere (Debian/Ubuntu use `/usr/local/share/ca-certificates/`), edit the `volumes:` line in `compose.yaml`. If you don't have a TLS-intercepting proxy, comment the line out.
 
+### SELinux on enforcing RHEL
+
+The CA anchor mount has no `,Z` flag — using one would relabel `/etc/pki/ca-trust/source/anchors` away from `cert_t` and break `update-ca-trust`. The trade-off: with SELinux **enforcing**, the container can't read the mount and silently loads zero certs. Symptom: TLS to `api.figma.com` fails with cert errors despite the volume being mounted.
+
+Pick one fix on the host:
+
+```sh
+# Preferred: flip the SELinux boolean (persists across reboots).
+sudo setsebool -P container_use_cert_t 1
+
+# Fallback: per-container label opt-out. Add to compose.yaml under security_opt:
+#   - label=disable
+```
+
+Verify after restart:
+
+```sh
+podman logs figma-context-mcp 2>&1 | grep 'CA anchor'   # should report N file(s) loaded
+```
+
 The container is **standalone — start and stop it manually**. There's no auto-start; if you want it on after a reboot, run `podman-compose up -d` again.
 
 Day-to-day:
