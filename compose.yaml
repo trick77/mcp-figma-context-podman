@@ -10,9 +10,11 @@ services:
       # in download_figma_images responses is directly openable on the
       # host — agents need no translation, no per-project instructions.
       # Overrides the Containerfile's IMAGE_DIR=/home/node/images default.
-      # IMAGES_HOST_DIR must be set in .env (compose can't expand $HOME
-      # inside a default fallback, so we don't ship one here).
-      IMAGE_DIR: ${IMAGES_HOST_DIR:?IMAGES_HOST_DIR must be set in .env to an absolute host path}
+      # IMAGES_HOST_DIR must be set in .env to a literal absolute path.
+      # No default here: podman-compose can't expand $HOME inside a
+      # default fallback, and a literal /var/tmp default would surprise
+      # operators about where files land. Force an explicit choice.
+      IMAGE_DIR: ${IMAGES_HOST_DIR:?IMAGES_HOST_DIR must be set in .env to an absolute host path (see .env.example)}
     ports:
       - "127.0.0.1:23149:3333"
     read_only: true
@@ -21,13 +23,12 @@ services:
     volumes:
       # Image-download dir. download_figma_images writes here; host-side
       # agents read the files at the EXACT path the tool returns, because
-      # source == target. IMAGES_HOST_DIR is set in .env to an absolute
-      # path (e.g. $HOME/.cache/figma-context-mcp — the .env.example
-      # setup line expands $HOME at shell time). ',Z' relabels for
-      # SELinux; ',U' chowns the host source to the mapped container UID
-      # so the non-root `node` user can write — use a dedicated/empty
-      # dir, not one with files whose ownership you rely on. Never
-      # bind-mount a system dir.
+      # source == target. IMAGES_HOST_DIR is required (see .env.example);
+      # podman creates the dir on first `up` if it doesn't exist. ',Z'
+      # relabels for SELinux; ',U' chowns the host source to the mapped
+      # container UID so the non-root `node` user can write — use a
+      # dedicated/empty dir, not one with files whose ownership you rely
+      # on. Never bind-mount a system dir.
       - ${IMAGES_HOST_DIR}:${IMAGES_HOST_DIR}:Z,U
       # Drop corporate root CAs (.crt / .pem) into ./certs/ next to this
       # compose.yaml. The entrypoint unions everything in /etc/ssl/ca-anchors
