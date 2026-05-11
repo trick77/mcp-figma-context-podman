@@ -7,11 +7,6 @@
 certs/*
 !certs/.gitkeep
 
-# Figma assets downloaded by the container at runtime. Bind-mounted to
-# /home/node/images so host-side agents can read them directly. Never committed.
-images/*
-!images/.gitkeep
-
 # IDEs / editors
 .idea/
 *.iml
