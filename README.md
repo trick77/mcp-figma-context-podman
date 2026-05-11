@@ -1,6 +1,6 @@
 # mcp-figma-context-podman
 
-Hardened podman wrapper around [`GLips/Figma-Context-MCP`](https://github.com/GLips/Figma-Context-MCP) (npm: [`figma-developer-mcp`](https://www.npmjs.com/package/figma-developer-mcp), "Framelink MCP for Figma"). Built for enterprise workstations: a single published image works on default-trust hosts and behind TLS-intercepting corporate proxies (CAs are mounted at runtime, not baked in). Container is `--read-only` with a single named volume for image downloads, PAT lives in `.env` (chmod 600), exposed only on `127.0.0.1:23149`.
+Hardened podman wrapper around [`GLips/Figma-Context-MCP`](https://github.com/GLips/Figma-Context-MCP) (npm: [`figma-developer-mcp`](https://www.npmjs.com/package/figma-developer-mcp), "Framelink MCP for Figma"). Built for enterprise workstations: a single published image works on default-trust hosts and behind TLS-intercepting corporate proxies (CAs are mounted at runtime, not baked in). Container is `--read-only` with a single project-local bind mount for image downloads, PAT lives in `.env` (chmod 600), exposed only on `127.0.0.1:23149`.
 
 Upstream speaks **streamable-http natively** (Express). No stdio bridge, no `mcp-proxy` — the container runs the published npm bin directly.
 
@@ -66,26 +66,25 @@ opencode-presets reset mcp.figma-context-mcp
 1. `podman-compose up -d` boots `ghcr.io/trick77/figma-context-mcp:latest` and publishes `127.0.0.1:23149:3333`.
 2. Entrypoint reads `/etc/ssl/ca-anchors/*` (read-only mount of `./certs/`), concatenates them to `/tmp/ca-anchors.bundle`, sets `NODE_EXTRA_CA_CERTS`, and exec's the Express server on `:3333`.
 3. The MCP client opens a streamable-http connection to `http://127.0.0.1:23149/mcp` and sends `initialize` → `tools/list`.
-4. Tool calls hit `api.figma.com` with `FIGMA_API_KEY` from `.env`. `download_figma_images` writes files into the named volume `figma-images` mounted at `/home/node/images`.
+4. Tool calls hit `api.figma.com` with `FIGMA_API_KEY` from `.env`. `download_figma_images` writes files into a project-local host dir bind-mounted at `/home/node/images` (default `./images/` next to `compose.yaml`; override via `IMAGES_HOST_DIR` in `.env`).
 
 `pids_limit=64` caps total processes inside the container.
 
 ## Image downloads
 
-The `download_figma_images` tool writes PNG/JPG/SVG files to `/home/node/images` inside the container. That path is backed by the named podman volume `figma-images` — it's the only writable surface besides `/tmp`.
+The `download_figma_images` tool writes PNG/JPG/SVG files to `/home/node/images` inside the container. That path is a host bind mount — files appear directly on the host at `$IMAGES_HOST_DIR` (default `./images/` next to `compose.yaml`).
+
+> **Tell your consuming agent the absolute host path explicitly.** The MCP tool response returns the container path `/home/node/images/...`, which agents running from another project's cwd cannot resolve. Either paste the absolute host path of the bind source into the agent's context, or set `IMAGES_HOST_DIR=/abs/path/to/your-project/assets` in `.env` so the bind source *is* your project's natural assets dir.
 
 ```sh
-# Where the volume lives on the host
-podman volume inspect figma-images
+# List downloaded files (host side)
+ls -la "${IMAGES_HOST_DIR:-./images}"
 
-# List downloaded files
-podman exec figma-context-mcp ls -la /home/node/images
-
-# Wipe (e.g. after the agent grabbed a lot during a session)
-podman-compose down
-podman volume rm figma-images
-podman-compose up -d
+# Wipe between sessions
+rm -rf "${IMAGES_HOST_DIR:-./images}"/*
 ```
+
+Caveat: the bind mount uses `:U`, which chowns the host source recursively to the mapped container UID on each `up`. Use an empty or dedicated dir as `IMAGES_HOST_DIR` — never a shared dir with files whose ownership you rely on.
 
 ## Rotating the PAT
 
@@ -155,7 +154,7 @@ podman logs figma-context-mcp 2>&1 | grep -i 'CA anchor'
 ## Hardening
 
 - `read_only` rootfs; tmpfs mount at `/tmp` discarded on exit.
-- One writable mount: named volume `figma-images` for the `download_figma_images` tool.
+- One writable mount: project-local bind mount `./images/` (or `$IMAGES_HOST_DIR`) → `/home/node/images` for the `download_figma_images` tool.
 - One read-only host bind mount: `./certs/` → `/etc/ssl/ca-anchors` (project-local, not a system dir).
 - `cap_drop: ALL`, `no-new-privileges`, runs as non-root `node`.
 - `pids_limit=64`.
@@ -170,7 +169,7 @@ Holds the PAT. Set `chmod 600 .env` after editing — it's gitignored but still 
 ```
 .
 ├── Containerfile                 # single-stage Node 22 + npm install + entrypoint
-├── compose.yaml                  # podman-compose service, named volume, CA mount
+├── compose.yaml                  # podman-compose service, bind mounts (images, CA)
 ├── .env.example                  # runtime config template (.env is gitignored)
 ├── .upstream-version             # CI-only: pinned figma-developer-mcp npm version
 ├── certs/                        # operator-supplied corp root CAs (.crt/.pem); gitignored
@@ -184,7 +183,7 @@ Holds the PAT. Set `chmod 600 .env` after editing — it's gitignored but still 
 
 ```sh
 podman-compose down
-podman volume rm figma-images
+rm -rf "${IMAGES_HOST_DIR:-./images}"/*
 podman rmi ghcr.io/trick77/figma-context-mcp:latest
 opencode-presets reset mcp.figma-context-mcp     # if you ran the preset
 ```
