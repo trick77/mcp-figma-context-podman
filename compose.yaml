@@ -4,18 +4,29 @@ services:
     container_name: figma-context-mcp
     restart: "no"
     env_file: .env
+    environment:
+      # Mount the host dir at the same absolute path inside the container
+      # AND tell upstream to write there. Result: the path upstream returns
+      # in download_figma_images responses is directly openable on the
+      # host — agents need no translation, no per-project instructions.
+      # Overrides the Containerfile's IMAGE_DIR=/home/node/images default.
+      IMAGE_DIR: ${IMAGES_HOST_DIR:-$HOME/.cache/figma-mcp-images}
     ports:
       - "127.0.0.1:23149:3333"
     read_only: true
     tmpfs:
       - /tmp
     volumes:
-      # Project-local image-download dir. download_figma_images writes here;
-      # host-side agents read the files directly without `podman cp`.
-      # ',Z' relabels for SELinux; ',U' chowns the host dir to the mapped
-      # container UID so the non-root `node` user can write. Project-local
-      # only — never bind-mount a system dir.
-      - ./images:/home/node/images:Z,U
+      # Image-download dir. download_figma_images writes here; host-side
+      # agents read the files at the EXACT path the tool returns, because
+      # source == target. Defaults to ~/.cache/figma-mcp-images so the
+      # wrapper works with zero per-host config; override IMAGES_HOST_DIR
+      # in .env (must be absolute) to land files somewhere else.
+      # ',Z' relabels for SELinux; ',U' chowns the host source to the
+      # mapped container UID so the non-root `node` user can write — use
+      # a dedicated/empty dir, not one with files whose ownership you
+      # rely on. Never bind-mount a system dir.
+      - ${IMAGES_HOST_DIR:-$HOME/.cache/figma-mcp-images}:${IMAGES_HOST_DIR:-$HOME/.cache/figma-mcp-images}:Z,U
       # Drop corporate root CAs (.crt / .pem) into ./certs/ next to this
       # compose.yaml. The entrypoint unions everything in /etc/ssl/ca-anchors
       # into a Node-readable bundle and points NODE_EXTRA_CA_CERTS at it.
