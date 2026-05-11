@@ -23,7 +23,13 @@ Tool reference: [framelink.ai/docs](https://www.framelink.ai/docs/quickstart) an
 ```sh
 cp .env.example .env
 chmod 600 .env
+
+# Set FIGMA_API_KEY and IMAGES_HOST_DIR. The one-liner below sets a
+# sane default for IMAGES_HOST_DIR (shell expands $HOME so compose
+# sees a literal absolute path).
+sed -i "s|^IMAGES_HOST_DIR=.*|IMAGES_HOST_DIR=$HOME/.cache/figma-context-mcp|" .env
 $EDITOR .env                       # set FIGMA_API_KEY
+
 podman-compose up -d               # pulls + starts
 ```
 
@@ -72,21 +78,22 @@ opencode-presets reset mcp.figma-context-mcp
 
 ## Image downloads
 
-By default, `download_figma_images` lands files in `~/.cache/figma-context-mcp/` on the host. That same path is bind-mounted at the same location inside the container and set as upstream's `IMAGE_DIR` — so the path the tool returns is the *host* path, openable directly by any consuming agent with no translation, no per-project instructions, no `podman cp`.
+`download_figma_images` lands files at `$IMAGES_HOST_DIR` on the host. The same path is bind-mounted at the same location inside the container and set as upstream's `IMAGE_DIR` — so the path the tool returns is the *host* path, openable directly by any consuming agent with no translation, no per-project instructions, no `podman cp`.
+
+The First-time setup snippet defaults `IMAGES_HOST_DIR` to `$HOME/.cache/figma-context-mcp`. Override it in `.env` to land files inside a specific project's tree instead, then `podman-compose up -d --force-recreate`.
 
 ```sh
 # List what's been downloaded
-ls -la ~/.cache/figma-context-mcp
+ls -la "$IMAGES_HOST_DIR"
 
 # Wipe between sessions
-rm -rf ~/.cache/figma-context-mcp/*
+rm -rf "$IMAGES_HOST_DIR"/*
 ```
 
-To land files somewhere else (e.g. inside a consuming project's tree), set `IMAGES_HOST_DIR` in `.env` to an absolute path and `podman-compose up -d --force-recreate`.
-
 Caveats:
+- `IMAGES_HOST_DIR` must be a literal absolute path. `podman-compose` does not expand `$HOME` inside compose defaults, which is why the setup snippet pre-expands it via shell.
 - The bind mount uses `:U`, which chowns the host source recursively to the mapped container UID on each `up`. Use an empty/dedicated dir — never a shared dir with files whose ownership you rely on.
-- On macOS podman, the path must live under a location the podman machine sees (typically anywhere under `$HOME`). The default `~/.cache/figma-context-mcp` satisfies this.
+- On macOS podman, the path must live under a location the podman machine sees (typically anywhere under `$HOME`).
 
 ## Rotating the PAT
 
@@ -185,7 +192,7 @@ Holds the PAT. Set `chmod 600 .env` after editing — it's gitignored but still 
 
 ```sh
 podman-compose down
-rm -rf "${IMAGES_HOST_DIR:-$HOME/.cache/figma-context-mcp}"/*
+rm -rf "$IMAGES_HOST_DIR"/*
 podman rmi ghcr.io/trick77/figma-context-mcp:latest
 opencode-presets reset mcp.figma-context-mcp     # if you ran the preset
 ```
