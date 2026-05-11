@@ -10,7 +10,12 @@ services:
     tmpfs:
       - /tmp
     volumes:
-      - figma-images:/home/node/images
+      # Project-local image-download dir. download_figma_images writes here;
+      # host-side agents read the files directly without `podman cp`.
+      # ',Z' relabels for SELinux; ',U' chowns the host dir to the mapped
+      # container UID so the non-root `node` user can write. Project-local
+      # only — never bind-mount a system dir.
+      - ./images:/home/node/images:Z,U
       # Drop corporate root CAs (.crt / .pem) into ./certs/ next to this
       # compose.yaml. The entrypoint unions everything in /etc/ssl/ca-anchors
       # into a Node-readable bundle and points NODE_EXTRA_CA_CERTS at it.
@@ -23,6 +28,3 @@ services:
     cap_drop:
       - ALL
     pids_limit: 64
-
-volumes:
-  figma-images:
