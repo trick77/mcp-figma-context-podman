@@ -30,6 +30,11 @@ LABEL org.opencontainers.image.title="figma-context-mcp" \
 RUN --mount=type=cache,target=/root/.npm,sharing=locked,id=npm-cache \
     npm install -g --omit=dev --prefer-offline "figma-developer-mcp@${VERSION}"
 
+# Pre-create the image-download dir with node:node so the named volume
+# inherits writable ownership on first creation. Without this, the
+# mountpoint ends up root-owned and `download_figma_images` EACCES.
+RUN mkdir -p /home/node/images && chown node:node /home/node/images
+
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 0755 /usr/local/bin/entrypoint.sh
 
