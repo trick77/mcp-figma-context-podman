@@ -23,13 +23,7 @@ Tool reference: [framelink.ai/docs](https://www.framelink.ai/docs/quickstart) an
 ```sh
 cp .env.example .env
 chmod 600 .env
-
-# Set FIGMA_API_KEY and IMAGES_HOST_DIR. The one-liner below sets a
-# sane default for IMAGES_HOST_DIR (shell expands $HOME so compose
-# sees a literal absolute path).
-sed -i "s|^IMAGES_HOST_DIR=.*|IMAGES_HOST_DIR=$HOME/.cache/figma-context-mcp|" .env
 $EDITOR .env                       # set FIGMA_API_KEY
-
 podman-compose up -d               # pulls + starts
 ```
 
