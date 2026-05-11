@@ -23,9 +23,11 @@ Tool reference: [framelink.ai/docs](https://www.framelink.ai/docs/quickstart) an
 ```sh
 cp .env.example .env
 chmod 600 .env
-$EDITOR .env                       # set FIGMA_API_KEY
+$EDITOR .env                       # set FIGMA_API_KEY and IMAGES_HOST_DIR
 podman-compose up -d               # pulls + starts
 ```
+
+`IMAGES_HOST_DIR` must be a literal absolute path (`podman-compose` doesn't expand `$HOME` or `~`). The dir is created on first `up` if missing.
 
 **Behind a TLS-intercepting corporate proxy?** Drop your corp root CA(s) (`.crt` / `.pem`) into the `./certs/` directory next to `compose.yaml`, then `podman-compose restart`. The entrypoint unions everything in `./certs/` into a Node-readable bundle, sets `NODE_EXTRA_CA_CERTS`, and logs `entrypoint: loaded N CA anchor file(s)` on startup. Files in `./certs/` are gitignored. Empty dir is a no-op (the default for non-corp users).
 
@@ -74,7 +76,9 @@ opencode-presets reset mcp.figma-context-mcp
 
 `download_figma_images` lands files at `$IMAGES_HOST_DIR` on the host. The same path is bind-mounted at the same location inside the container and set as upstream's `IMAGE_DIR` — so the path the tool returns is the *host* path, openable directly by any consuming agent with no translation, no per-project instructions, no `podman cp`.
 
-The First-time setup snippet defaults `IMAGES_HOST_DIR` to `$HOME/.cache/figma-context-mcp`. Override it in `.env` to land files inside a specific project's tree instead, then `podman-compose up -d --force-recreate`.
+`IMAGES_HOST_DIR` is set in `.env` (see First-time setup). Pick wherever you want files to land — common choices:
+- `/home/<you>/.cache/figma-context-mcp` — out of the way, persistent.
+- `/abs/path/to/your-project/assets` — files end up inside a specific project's tree.
 
 ```sh
 # List what's been downloaded
@@ -85,9 +89,8 @@ rm -rf "$IMAGES_HOST_DIR"/*
 ```
 
 Caveats:
-- `IMAGES_HOST_DIR` must be a literal absolute path. `podman-compose` does not expand `$HOME` inside compose defaults, which is why the setup snippet pre-expands it via shell.
+- `IMAGES_HOST_DIR` must be a literal absolute path. `podman-compose` doesn't expand `$HOME` or `~` in compose values, so write the path out in full.
 - The bind mount uses `:U`, which chowns the host source recursively to the mapped container UID on each `up`. Use an empty/dedicated dir — never a shared dir with files whose ownership you rely on.
-- On macOS podman, the path must live under a location the podman machine sees (typically anywhere under `$HOME`).
 
 ## Rotating the PAT
 
