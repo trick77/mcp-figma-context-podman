@@ -72,21 +72,21 @@ opencode-presets reset mcp.figma-context-mcp
 
 ## Image downloads
 
-By default, `download_figma_images` lands files in `~/.cache/figma-mcp-images/` on the host. That same path is bind-mounted at the same location inside the container and set as upstream's `IMAGE_DIR` — so the path the tool returns is the *host* path, openable directly by any consuming agent with no translation, no per-project instructions, no `podman cp`.
+By default, `download_figma_images` lands files in `~/.cache/figma-context-mcp/` on the host. That same path is bind-mounted at the same location inside the container and set as upstream's `IMAGE_DIR` — so the path the tool returns is the *host* path, openable directly by any consuming agent with no translation, no per-project instructions, no `podman cp`.
 
 ```sh
 # List what's been downloaded
-ls -la ~/.cache/figma-mcp-images
+ls -la ~/.cache/figma-context-mcp
 
 # Wipe between sessions
-rm -rf ~/.cache/figma-mcp-images/*
+rm -rf ~/.cache/figma-context-mcp/*
 ```
 
 To land files somewhere else (e.g. inside a consuming project's tree), set `IMAGES_HOST_DIR` in `.env` to an absolute path and `podman-compose up -d --force-recreate`.
 
 Caveats:
 - The bind mount uses `:U`, which chowns the host source recursively to the mapped container UID on each `up`. Use an empty/dedicated dir — never a shared dir with files whose ownership you rely on.
-- On macOS podman, the path must live under a location the podman machine sees (typically anywhere under `$HOME`). The default `~/.cache/figma-mcp-images` satisfies this.
+- On macOS podman, the path must live under a location the podman machine sees (typically anywhere under `$HOME`). The default `~/.cache/figma-context-mcp` satisfies this.
 
 ## Rotating the PAT
 
@@ -185,7 +185,7 @@ Holds the PAT. Set `chmod 600 .env` after editing — it's gitignored but still 
 
 ```sh
 podman-compose down
-rm -rf "${IMAGES_HOST_DIR:-$HOME/.cache/figma-mcp-images}"/*
+rm -rf "${IMAGES_HOST_DIR:-$HOME/.cache/figma-context-mcp}"/*
 podman rmi ghcr.io/trick77/figma-context-mcp:latest
 opencode-presets reset mcp.figma-context-mcp     # if you ran the preset
 ```
