@@ -1,4 +1,4 @@
-FROM node:22-slim
+FROM node:26-slim
 
 # Install only what's needed at runtime. ca-certificates ships the system
 # trust store; the entrypoint script unions our system bundle with any
